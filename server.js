@@ -1,6 +1,7 @@
+
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const path = require('path');
 
@@ -46,7 +47,7 @@ db.serialize(() => {
 // ثبت‌نام کاربر
 app.post('/api/register', async (req, res) => {
   const { username, email, password } = req.body;
-  const hashed = await bcrypt.hash(password, 10);
+  const hashed = await bcryptjs.hash(password, 10);
   db.run(
     'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
     [username, email, hashed],
@@ -62,7 +63,7 @@ app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   db.get('SELECT * FROM users WHERE username = ?', [username], async (err, row) => {
     if (!row) return res.status(404).json({ error: 'User not found' });
-    const match = await bcrypt.compare(password, row.password);
+    const match = await bcryptjs.compare(password, row.password);
     if (!match) return res.status(401).json({ error: 'Incorrect password' });
     res.json({ success: true, userId: row.id, username: row.username });
   });
