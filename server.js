@@ -1,24 +1,23 @@
-
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcryptjs'); // ✅ درست: bcryptjs
 const cors = require('cors');
 const path = require('path');
 
 const app = express();
 const db = new sqlite3.Database('./dolphin.db');
 
-// Middleware
+// ✅ تنظیم CORS برای GitHub Pages
 app.use(cors({
-  origin: 'https://dolphinwalletfinder.github.io',
+  origin: ['https://dolphinwalletfinder.github.io'],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type']
 }));
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-
-// ایجاد جدول‌ها
+// ✅ ایجاد جدول‌ها
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,10 +48,10 @@ db.serialize(() => {
   )`);
 });
 
-// ثبت‌نام کاربر
+// ✅ ثبت‌نام
 app.post('/api/register', async (req, res) => {
   const { username, email, password } = req.body;
-  const hashed = await bcryptjs.hash(password, 10);
+  const hashed = await bcrypt.hash(password, 10);
   db.run(
     'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
     [username, email, hashed],
@@ -63,18 +62,18 @@ app.post('/api/register', async (req, res) => {
   );
 });
 
-// ورود کاربر
+// ✅ ورود
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   db.get('SELECT * FROM users WHERE username = ?', [username], async (err, row) => {
     if (!row) return res.status(404).json({ error: 'User not found' });
-    const match = await bcryptjs.compare(password, row.password);
+    const match = await bcrypt.compare(password, row.password);
     if (!match) return res.status(401).json({ error: 'Incorrect password' });
     res.json({ success: true, userId: row.id, username: row.username });
   });
 });
 
-// ذخیره کیف‌پول
+// ✅ ثبت کیف پول
 app.post('/api/wallet', (req, res) => {
   const { userId, address, balance, network, lastTx } = req.body;
   db.run(
@@ -87,7 +86,7 @@ app.post('/api/wallet', (req, res) => {
   );
 });
 
-// ثبت هش لایسنس
+// ✅ ثبت هش لایسنس
 app.post('/api/license', (req, res) => {
   const { username, hash } = req.body;
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
@@ -103,7 +102,7 @@ app.post('/api/license', (req, res) => {
   });
 });
 
-// وضعیت تایید نهایی
+// ✅ وضعیت تایید نهایی
 app.get('/api/status/:username', (req, res) => {
   const username = req.params.username;
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, user) => {
@@ -119,7 +118,7 @@ app.get('/api/status/:username', (req, res) => {
   });
 });
 
-// مسیر جدید برای بررسی وضعیت لایسنس
+// ✅ بررسی وضعیت لایسنس
 app.get('/api/license-status/:username', (req, res) => {
   const username = req.params.username;
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, user) => {
@@ -135,7 +134,7 @@ app.get('/api/license-status/:username', (req, res) => {
   });
 });
 
-// تایید ادمین با توجه به نوع
+// ✅ تایید ادمین
 app.post('/api/admin/approve', (req, res) => {
   const { username, status, type } = req.body;
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
@@ -152,6 +151,6 @@ app.post('/api/admin/approve', (req, res) => {
   });
 });
 
-// اجرای سرور
+// ✅ اجرای سرور
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Server running on port', PORT));
+app.listen(PORT, () => console.log('✅ Server running on port', PORT));
