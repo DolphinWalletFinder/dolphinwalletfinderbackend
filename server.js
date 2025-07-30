@@ -115,7 +115,27 @@ app.post('/api/transaction', (req, res) => {
   );
 });
 
-// دریافت وضعیت تأیید تراکنش
+// API جدید: دریافت وضعیت لایسنس کاربر
+app.get('/api/license-status/:username', (req, res) => {
+  const username = req.params.username;
+  db.get(
+    'SELECT id FROM users WHERE username = ?',
+    [username],
+    (err, user) => {
+      if (err || !user) return res.status(404).json({ error: 'User not found' });
+      db.get(
+        'SELECT status FROM license_payments WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+        [user.id],
+        (err2, row) => {
+          if (err2) return res.status(500).json({ error: err2.message });
+          res.json({ status: row?.status || 'pending' });
+        }
+      );
+    }
+  );
+});
+
+// دریافت وضعیت تأیید تراکنش (اختیاری، دیگه برای فعال شدن دکمه استفاده نمیشه)
 app.get('/api/status/:username', (req, res) => {
   const username = req.params.username;
   db.get(
@@ -135,7 +155,7 @@ app.get('/api/status/:username', (req, res) => {
   );
 });
 
-// ادمین تغییر وضعیت تأیید (اصلاح‌شده: فقط آخرین برداشت را تایید می‌کند)
+// ادمین تغییر وضعیت تأیید (فقط آخرین برداشت را تایید می‌کند)
 app.post('/api/admin/approve', (req, res) => {
   const { username, status } = req.body;
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
