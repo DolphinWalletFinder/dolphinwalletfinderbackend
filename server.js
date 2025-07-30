@@ -14,41 +14,33 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 // ایجاد جدول‌ها
 db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE,
-      email TEXT,
-      password TEXT
-    )
-  `);
-  db.run(`
-    CREATE TABLE IF NOT EXISTS wallets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      address TEXT,
-      balance TEXT,
-      network TEXT,
-      lastTx TEXT
-    )
-  `);
-  db.run(`
-    CREATE TABLE IF NOT EXISTS license_payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      hash TEXT,
-      status TEXT DEFAULT 'pending'
-    )
-  `);
-  db.run(`
-    CREATE TABLE IF NOT EXISTS final_transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      hash TEXT,
-      status TEXT DEFAULT 'pending',
-      withdraw_address TEXT
-    )
-  `);
+  db.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    email TEXT,
+    password TEXT
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS wallets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    address TEXT,
+    balance TEXT,
+    network TEXT,
+    lastTx TEXT
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS license_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    hash TEXT,
+    status TEXT DEFAULT 'pending'
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS final_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    hash TEXT,
+    status TEXT DEFAULT 'pending',
+    withdraw_address TEXT
+  )`);
 });
 
 // ثبت‌نام کاربر
@@ -76,7 +68,7 @@ app.post('/api/login', (req, res) => {
   });
 });
 
-// ذخیره کیف‌پول کشف‌شده
+// ذخیره کیف‌پول
 app.post('/api/wallet', (req, res) => {
   const { userId, address, balance, network, lastTx } = req.body;
   db.run(
@@ -89,104 +81,71 @@ app.post('/api/wallet', (req, res) => {
   );
 });
 
-// ثبت هش پرداخت لایسنس
+// ثبت هش لایسنس
 app.post('/api/license', (req, res) => {
-  const { userId, hash } = req.body;
-  db.run(
-    'INSERT INTO license_payments (user_id, hash) VALUES (?, ?)',
-    [userId, hash],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true });
-    }
-  );
+  const { username, hash } = req.body;
+  db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
+    if (!row) return res.status(404).json({ error: 'User not found' });
+    db.run(
+      'INSERT INTO license_payments (user_id, hash) VALUES (?, ?)',
+      [row.id, hash],
+      err2 => {
+        if (err2) return res.status(500).json({ error: err2.message });
+        res.json({ success: true });
+      }
+    );
+  });
 });
 
-// ثبت تراکنش نهایی و آدرس برداشت
-app.post('/api/transaction', (req, res) => {
-  const { userId, hash, withdraw_address } = req.body;
-  db.run(
-    'INSERT INTO final_transactions (user_id, hash, withdraw_address) VALUES (?, ?, ?)',
-    [userId, hash, withdraw_address],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true });
-    }
-  );
-});
-
-// دریافت وضعیت تأیید تراکنش
+// وضعیت تایید نهایی
 app.get('/api/status/:username', (req, res) => {
   const username = req.params.username;
-  db.get(
-    'SELECT id FROM users WHERE username = ?',
-    [username],
-    (err, user) => {
-      if (err || !user) return res.status(404).json({ error: 'User not found' });
-      db.get(
-        'SELECT status FROM final_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1',
-        [user.id],
-        (err2, row) => {
-          if (err2) return res.status(500).json({ error: err2.message });
-          res.json({ status: row?.status || 'pending' });
-        }
-      );
-    }
-  );
+  db.get('SELECT id FROM users WHERE username = ?', [username], (err, user) => {
+    if (err || !user) return res.status(404).json({ error: 'User not found' });
+    db.get(
+      'SELECT status FROM final_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+      [user.id],
+      (err2, row) => {
+        if (err2) return res.status(500).json({ error: err2.message });
+        res.json({ status: row?.status || 'pending' });
+      }
+    );
+  });
 });
 
-// ادمین تغییر وضعیت تأیید
+// مسیر جدید برای بررسی وضعیت لایسنس
+app.get('/api/license-status/:username', (req, res) => {
+  const username = req.params.username;
+  db.get('SELECT id FROM users WHERE username = ?', [username], (err, user) => {
+    if (err || !user) return res.status(404).json({ error: 'User not found' });
+    db.get(
+      'SELECT status FROM license_payments WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+      [user.id],
+      (err2, row) => {
+        if (err2) return res.status(500).json({ error: err2.message });
+        res.json({ status: row?.status || 'pending' });
+      }
+    );
+  });
+});
+
+// تایید ادمین با توجه به نوع
 app.post('/api/admin/approve', (req, res) => {
-  const { username, status } = req.body;
+  const { username, status, type } = req.body;
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
     if (!row) return res.status(404).json({ error: 'User not found' });
+    const table = type === "license" ? "license_payments" : "final_transactions";
     db.run(
-      'UPDATE final_transactions SET status = ? WHERE user_id = ?',
+      `UPDATE ${table} SET status = ? WHERE user_id = ?`,
       [status, row.id],
-      function (err2) {
+      (err2) => {
         if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ success: true, updated: this.changes });
+        res.json({ success: true });
       }
     );
   });
 });
 
-
-// تأیید پرداخت لایسنس توسط ادمین
-app.post('/api/admin/approve-license', (req, res) => {
-  const { username, status } = req.body;
-  db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
-    if (!row) return res.status(404).json({ error: 'User not found' });
-    db.run(
-      'UPDATE license_payments SET status = ? WHERE user_id = ?',
-      [status, row.id],
-      function (err2) {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ success: true, updated: this.changes });
-      }
-    );
-  });
-});
-
-// تأیید پرداخت هزینه تراکنش توسط ادمین
-app.post('/api/admin/approve-transaction', (req, res) => {
-  const { username, status } = req.body;
-  db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
-    if (!row) return res.status(404).json({ error: 'User not found' });
-    db.run(
-      'UPDATE final_transactions SET status = ? WHERE user_id = ?',
-      [status, row.id],
-      function (err2) {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ success: true, updated: this.changes });
-      }
-    );
-  });
-});
-
-
-// Start
-const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
+// اجرای سرور
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log('Server running on port', PORT));
