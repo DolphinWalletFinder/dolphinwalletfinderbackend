@@ -1,13 +1,13 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcryptjs'); // ✅ درست: bcryptjs
+const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const path = require('path');
 
 const app = express();
 const db = new sqlite3.Database('./dolphin.db');
 
-// ✅ تنظیم CORS برای GitHub Pages
+// ⚠️ برای GitHub Pages و Railway CORS رو درست تنظیم کن
 app.use(cors({
   origin: ['https://dolphinwalletfinder.github.io'],
   methods: ['GET', 'POST'],
@@ -17,7 +17,7 @@ app.use(cors({
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-// ✅ ایجاد جدول‌ها
+// ✅ ساخت جداول
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,15 +51,19 @@ db.serialize(() => {
 // ✅ ثبت‌نام
 app.post('/api/register', async (req, res) => {
   const { username, email, password } = req.body;
-  const hashed = await bcrypt.hash(password, 10);
-  db.run(
-    'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
-    [username, email, hashed],
-    function (err) {
-      if (err) return res.status(400).json({ error: 'Username already exists' });
-      res.json({ success: true, userId: this.lastID });
-    }
-  );
+  try {
+    const hashed = await bcrypt.hash(password, 10);
+    db.run(
+      'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
+      [username, email, hashed],
+      function (err) {
+        if (err) return res.status(400).json({ error: 'Username already exists' });
+        res.json({ success: true, userId: this.lastID });
+      }
+    );
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // ✅ ورود
@@ -73,7 +77,7 @@ app.post('/api/login', (req, res) => {
   });
 });
 
-// ✅ ثبت کیف پول
+// ✅ ذخیره کیف‌پول
 app.post('/api/wallet', (req, res) => {
   const { userId, address, balance, network, lastTx } = req.body;
   db.run(
@@ -102,22 +106,6 @@ app.post('/api/license', (req, res) => {
   });
 });
 
-// ✅ وضعیت تایید نهایی
-app.get('/api/status/:username', (req, res) => {
-  const username = req.params.username;
-  db.get('SELECT id FROM users WHERE username = ?', [username], (err, user) => {
-    if (err || !user) return res.status(404).json({ error: 'User not found' });
-    db.get(
-      'SELECT status FROM final_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1',
-      [user.id],
-      (err2, row) => {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ status: row?.status || 'pending' });
-      }
-    );
-  });
-});
-
 // ✅ بررسی وضعیت لایسنس
 app.get('/api/license-status/:username', (req, res) => {
   const username = req.params.username;
@@ -134,7 +122,23 @@ app.get('/api/license-status/:username', (req, res) => {
   });
 });
 
-// ✅ تایید ادمین
+// ✅ بررسی وضعیت نهایی (برای دکمه نهایی)
+app.get('/api/status/:username', (req, res) => {
+  const username = req.params.username;
+  db.get('SELECT id FROM users WHERE username = ?', [username], (err, user) => {
+    if (err || !user) return res.status(404).json({ error: 'User not found' });
+    db.get(
+      'SELECT status FROM final_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+      [user.id],
+      (err2, row) => {
+        if (err2) return res.status(500).json({ error: err2.message });
+        res.json({ status: row?.status || 'pending' });
+      }
+    );
+  });
+});
+
+// ✅ تأیید توسط ادمین (لایسنس یا نهایی)
 app.post('/api/admin/approve', (req, res) => {
   const { username, status, type } = req.body;
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
@@ -152,5 +156,7 @@ app.post('/api/admin/approve', (req, res) => {
 });
 
 // ✅ اجرای سرور
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('✅ Server running on port', PORT));
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+});
