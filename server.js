@@ -10,7 +10,9 @@ const db = new sqlite3.Database('./dolphin.db');
 
 // Middleware
 app.use(cors({
-  origin: 'https://dolphinwalletfinder.github.io'
+  origin: 'https://dolphinwalletfinder.github.io',
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type']
 }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
