@@ -135,22 +135,26 @@ app.get('/api/status/:username', (req, res) => {
   );
 });
 
-// ادمین تغییر وضعیت تأیید
+// ادمین تغییر وضعیت تأیید (اصلاح‌شده: فقط آخرین برداشت را تایید می‌کند)
 app.post('/api/admin/approve', (req, res) => {
   const { username, status } = req.body;
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
     if (!row) return res.status(404).json({ error: 'User not found' });
     db.run(
-      'UPDATE final_transactions SET status = ? WHERE user_id = ?',
-      [status, row.id],
+      `UPDATE final_transactions
+       SET status = ?
+       WHERE user_id = ?
+       AND id = (SELECT id FROM final_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1)`,
+      [status, row.id, row.id],
       function (err2) {
         if (err2) return res.status(500).json({ error: err2.message });
+        if (this.changes === 0)
+          return res.status(404).json({ error: 'No final transaction found for this user. کاربر برداشت نزده است.' });
         res.json({ success: true, updated: this.changes });
       }
     );
   });
 });
-
 
 // تأیید پرداخت لایسنس توسط ادمین
 app.post('/api/admin/approve-license', (req, res) => {
@@ -183,7 +187,6 @@ app.post('/api/admin/approve-transaction', (req, res) => {
     );
   });
 });
-
 
 // Start
 const PORT = 3000;
