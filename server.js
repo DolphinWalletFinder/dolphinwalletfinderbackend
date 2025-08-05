@@ -61,6 +61,15 @@ db.serialize(() => {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
+    db.run(`
+        CREATE TABLE IF NOT EXISTS final_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            tx_hash TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
 });
 
 // ساخت ادمین پیش‌فرض اگر وجود ندارد
@@ -134,19 +143,18 @@ app.get('/api/my-wallet', authenticate, (req, res) => {
     });
 });
 
-// ذخیره ولت (یکبار برای هر کاربر)
+// ذخیره ولت
 app.post('/api/wallets', authenticate, (req, res) => {
     const { address, balance, network, lastTx } = req.body;
     if (!address || !balance || !network) {
         return res.status(400).json({ error: 'Incomplete wallet data' });
     }
 
-    // چک کنیم کاربر قبلاً ولت داره یا نه
     db.get('SELECT * FROM wallets WHERE user_id = ?', [req.user.id], (err, row) => {
         if (err) return res.status(500).json({ error: 'Database error' });
 
         if (row) {
-            return res.json({ success: true, wallet: row }); // برگردوندن ولت موجود
+            return res.json({ success: true, wallet: row });
         }
 
         db.run(
@@ -164,17 +172,9 @@ app.post('/api/wallets', authenticate, (req, res) => {
     });
 });
 
-// واکشی همه ولت‌ها
-app.get('/api/wallets', authenticate, (req, res) => {
-    db.all('SELECT * FROM wallets WHERE user_id = ?', [req.user.id], (err, rows) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        res.json(rows);
-    });
-});
-
 // ======================== سیستم لایسنس ========================
 
-// ثبت هش تراکنش
+// ثبت هش تراکنش لایسنس
 app.post('/api/license/request', authenticate, (req, res) => {
     const { tx_hash } = req.body;
     if (!tx_hash) return res.status(400).json({ error: 'Transaction hash is required' });
@@ -189,25 +189,58 @@ app.post('/api/license/request', authenticate, (req, res) => {
     );
 });
 
-// وضعیت لایسنس
+// وضعیت لایسنس (با برگرداندن tx_hash)
 app.get('/api/license/status', authenticate, (req, res) => {
     db.get('SELECT license FROM users WHERE id = ?', [req.user.id], (err, user) => {
         if (err) return res.status(500).json({ error: 'Database error' });
-        if (user.license === 'active') {
-            return res.json({ license: 'active' });
-        }
+
         db.get(
-            'SELECT status FROM license_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+            'SELECT tx_hash, status FROM license_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
             [req.user.id],
             (err, row) => {
                 if (err) return res.status(500).json({ error: 'Database error' });
-                res.json({ license: 'inactive', status: row ? row.status : null });
+                res.json({
+                    license: user.license,
+                    tx_hash: row ? row.tx_hash : null,
+                    status: row ? row.status : null
+                });
             }
         );
     });
 });
 
-// ادمین → گرفتن درخواست‌ها
+// ======================== هزینه تراکنش ========================
+
+// ثبت هش هزینه تراکنش
+app.post('/api/final-tx', authenticate, (req, res) => {
+    const { tx_hash } = req.body;
+    if (!tx_hash) return res.status(400).json({ error: 'Transaction hash is required' });
+
+    db.run(
+        'INSERT INTO final_transactions (user_id, tx_hash) VALUES (?, ?)',
+        [req.user.id, tx_hash],
+        function (err) {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ success: true });
+        }
+    );
+});
+
+// گرفتن هش هزینه تراکنش
+app.get('/api/final-tx', authenticate, (req, res) => {
+    db.get(
+        'SELECT tx_hash, status FROM final_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+        [req.user.id],
+        (err, row) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json(row || { tx_hash: null, status: null });
+        }
+    );
+});
+
+// ======================== مدیریت ادمین ========================
+
+// ادمین → گرفتن درخواست‌های لایسنس
 app.get('/api/admin/license-requests', authenticate, (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
 
@@ -224,7 +257,7 @@ app.get('/api/admin/license-requests', authenticate, (req, res) => {
     );
 });
 
-// ادمین → تایید یا رد درخواست
+// ادمین → تایید یا رد لایسنس
 app.post('/api/admin/approve-license', authenticate, (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
 
