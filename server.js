@@ -9,7 +9,7 @@ const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 
 // مسیر دیتابیس SQLite - Railway Persistent Storage
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'dolphin.db');
+const dbPath = process.env.DATABASE_PATH || '/mnt/data/dolphin.db';
 const db = new sqlite3.Database(dbPath);
 
 // Middleware
@@ -107,3 +107,4 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
+
