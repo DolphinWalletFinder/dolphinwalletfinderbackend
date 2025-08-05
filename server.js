@@ -9,7 +9,7 @@ const fs = require('fs');
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 
-// مسیر دیتابیس SQLite - Railway Persistent Storage
+// مسیر دیتابیس SQLite
 const dbPath = process.env.DATABASE_PATH || '/mnt/data/dolphin.db';
 
 // اطمینان از وجود پوشه دیتابیس
@@ -28,7 +28,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
     }
 });
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
@@ -40,7 +39,8 @@ db.serialize(() => {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE,
             email TEXT,
-            password TEXT
+            password TEXT,
+            license TEXT DEFAULT 'inactive'
         )
     `);
     db.run(`
@@ -53,7 +53,29 @@ db.serialize(() => {
             lastTx TEXT
         )
     `);
+    db.run(`
+        CREATE TABLE IF NOT EXISTS license_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            tx_hash TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
 });
+
+// احراز هویت
+function authenticate(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader) return res.status(401).json({ error: 'No token provided' });
+
+    const token = authHeader.split(' ')[1];
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+        if (err) return res.status(403).json({ error: 'Invalid token' });
+        req.user = decoded;
+        next();
+    });
+}
 
 // ثبت‌نام
 app.post('/api/register', async (req, res) => {
@@ -85,19 +107,6 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// Middleware احراز هویت
-function authenticate(req, res, next) {
-    const authHeader = req.headers['authorization'];
-    if (!authHeader) return res.status(401).json({ error: 'No token provided' });
-
-    const token = authHeader.split(' ')[1];
-    jwt.verify(token, JWT_SECRET, (err, decoded) => {
-        if (err) return res.status(403).json({ error: 'Invalid token' });
-        req.user = decoded;
-        next();
-    });
-}
-
 // ذخیره کیف‌پول
 app.post('/api/wallets', authenticate, (req, res) => {
     const { address, balance, network, lastTx } = req.body;
@@ -119,7 +128,86 @@ app.get('/api/wallets', authenticate, (req, res) => {
     });
 });
 
-// شروع سرور
+// ======================== سیستم لایسنس ========================
+
+// کاربر → ثبت هش تراکنش
+app.post('/api/license/request', authenticate, (req, res) => {
+    const { tx_hash } = req.body;
+    if (!tx_hash) return res.status(400).json({ error: 'Transaction hash is required' });
+
+    db.run(
+        'INSERT INTO license_requests (user_id, tx_hash) VALUES (?, ?)',
+        [req.user.id, tx_hash],
+        function (err) {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ success: true });
+        }
+    );
+});
+
+// کاربر → وضعیت لایسنس
+app.get('/api/license/status', authenticate, (req, res) => {
+    db.get('SELECT license FROM users WHERE id = ?', [req.user.id], (err, user) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        if (user.license === 'active') {
+            return res.json({ license: 'active' });
+        }
+        db.get(
+            'SELECT status FROM license_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+            [req.user.id],
+            (err, row) => {
+                if (err) return res.status(500).json({ error: 'Database error' });
+                res.json({ license: 'inactive', status: row ? row.status : null });
+            }
+        );
+    });
+});
+
+// ادمین → گرفتن درخواست‌ها
+app.get('/api/admin/license-requests', authenticate, (req, res) => {
+    db.all(
+        `SELECT license_requests.*, users.username 
+         FROM license_requests 
+         JOIN users ON license_requests.user_id = users.id
+         ORDER BY created_at DESC`,
+        [],
+        (err, rows) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json(rows);
+        }
+    );
+});
+
+// ادمین → تایید یا رد درخواست
+app.post('/api/admin/approve-license', authenticate, (req, res) => {
+    const { request_id, action } = req.body;
+    if (!request_id || !['approve', 'reject'].includes(action)) {
+        return res.status(400).json({ error: 'Invalid data' });
+    }
+
+    const status = action === 'approve' ? 'approved' : 'rejected';
+
+    db.run(
+        'UPDATE license_requests SET status = ? WHERE id = ?',
+        [status, request_id],
+        function (err) {
+            if (err) return res.status(500).json({ error: 'Database error' });
+
+            if (status === 'approved') {
+                db.get('SELECT user_id FROM license_requests WHERE id = ?', [request_id], (err, row) => {
+                    if (!err && row) {
+                        db.run('UPDATE users SET license = ? WHERE id = ?', ['active', row.user_id]);
+                    }
+                });
+            }
+
+            res.json({ success: true });
+        }
+    );
+});
+
+// ======================== ========================
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
