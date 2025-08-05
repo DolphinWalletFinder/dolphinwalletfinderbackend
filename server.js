@@ -122,20 +122,19 @@ app.post('/api/login', (req, res) => {
             JWT_SECRET,
             { expiresIn: '7d' }
         );
-        res.json({ token });
+        res.json({ token, role: row.role, username: row.username });
     });
 });
 
-// گرفتن ولت کاربر (برای چک کردن قبل از اسکن یا نمایش در نتایج)
+// گرفتن ولت کاربر
 app.get('/api/my-wallet', authenticate, (req, res) => {
     db.get('SELECT * FROM wallets WHERE user_id = ? LIMIT 1', [req.user.id], (err, row) => {
         if (err) return res.status(500).json({ error: 'Database error' });
-        if (!row) return res.json({ wallet: null });
-        res.json({ wallet: row });
+        res.json({ wallet: row || null });
     });
 });
 
-// ذخیره کیف‌پول (یکبار برای هر کاربر)
+// ذخیره ولت (یکبار برای هر کاربر)
 app.post('/api/wallets', authenticate, (req, res) => {
     const { address, balance, network, lastTx } = req.body;
     if (!address || !balance || !network) {
@@ -145,20 +144,27 @@ app.post('/api/wallets', authenticate, (req, res) => {
     // چک کنیم کاربر قبلاً ولت داره یا نه
     db.get('SELECT * FROM wallets WHERE user_id = ?', [req.user.id], (err, row) => {
         if (err) return res.status(500).json({ error: 'Database error' });
-        if (row) return res.status(400).json({ error: 'Wallet already exists for this user' });
+
+        if (row) {
+            return res.json({ success: true, wallet: row }); // برگردوندن ولت موجود
+        }
 
         db.run(
             'INSERT INTO wallets (user_id, address, balance, network, lastTx) VALUES (?, ?, ?, ?, ?)',
             [req.user.id, address, balance, network, lastTx],
             function (err) {
                 if (err) return res.status(500).json({ error: 'Database error' });
-                res.json({ success: true, id: this.lastID });
+                res.json({
+                    success: true,
+                    id: this.lastID,
+                    wallet: { address, balance, network, lastTx }
+                });
             }
         );
     });
 });
 
-// واکشی همه کیف‌پول‌های کاربر
+// واکشی همه ولت‌ها
 app.get('/api/wallets', authenticate, (req, res) => {
     db.all('SELECT * FROM wallets WHERE user_id = ?', [req.user.id], (err, rows) => {
         if (err) return res.status(500).json({ error: 'Database error' });
