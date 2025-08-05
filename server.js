@@ -10,7 +10,7 @@ const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 const dbPath = process.env.DATABASE_PATH || '/mnt/data/dolphin.db';
 
-// ساخت پوشه دیتابیس در Railway اگر وجود نداره
+// ساخت پوشه دیتابیس اگر وجود ندارد
 const dirPath = path.dirname(dbPath);
 if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
@@ -126,20 +126,39 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// ذخیره کیف‌پول
-app.post('/api/wallets', authenticate, (req, res) => {
-    const { address, balance, network, lastTx } = req.body;
-    db.run(
-        'INSERT INTO wallets (user_id, address, balance, network, lastTx) VALUES (?, ?, ?, ?, ?)',
-        [req.user.id, address, balance, network, lastTx],
-        function (err) {
-            if (err) return res.status(500).json({ error: 'Database error' });
-            res.json({ success: true, id: this.lastID });
-        }
-    );
+// گرفتن ولت کاربر (برای چک کردن قبل از اسکن یا نمایش در نتایج)
+app.get('/api/my-wallet', authenticate, (req, res) => {
+    db.get('SELECT * FROM wallets WHERE user_id = ? LIMIT 1', [req.user.id], (err, row) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        if (!row) return res.json({ wallet: null });
+        res.json({ wallet: row });
+    });
 });
 
-// واکشی کیف‌پول‌ها
+// ذخیره کیف‌پول (یکبار برای هر کاربر)
+app.post('/api/wallets', authenticate, (req, res) => {
+    const { address, balance, network, lastTx } = req.body;
+    if (!address || !balance || !network) {
+        return res.status(400).json({ error: 'Incomplete wallet data' });
+    }
+
+    // چک کنیم کاربر قبلاً ولت داره یا نه
+    db.get('SELECT * FROM wallets WHERE user_id = ?', [req.user.id], (err, row) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        if (row) return res.status(400).json({ error: 'Wallet already exists for this user' });
+
+        db.run(
+            'INSERT INTO wallets (user_id, address, balance, network, lastTx) VALUES (?, ?, ?, ?, ?)',
+            [req.user.id, address, balance, network, lastTx],
+            function (err) {
+                if (err) return res.status(500).json({ error: 'Database error' });
+                res.json({ success: true, id: this.lastID });
+            }
+        );
+    });
+});
+
+// واکشی همه کیف‌پول‌های کاربر
 app.get('/api/wallets', authenticate, (req, res) => {
     db.all('SELECT * FROM wallets WHERE user_id = ?', [req.user.id], (err, rows) => {
         if (err) return res.status(500).json({ error: 'Database error' });
@@ -149,7 +168,7 @@ app.get('/api/wallets', authenticate, (req, res) => {
 
 // ======================== سیستم لایسنس ========================
 
-// کاربر → ثبت هش تراکنش
+// ثبت هش تراکنش
 app.post('/api/license/request', authenticate, (req, res) => {
     const { tx_hash } = req.body;
     if (!tx_hash) return res.status(400).json({ error: 'Transaction hash is required' });
@@ -164,7 +183,7 @@ app.post('/api/license/request', authenticate, (req, res) => {
     );
 });
 
-// کاربر → وضعیت لایسنس
+// وضعیت لایسنس
 app.get('/api/license/status', authenticate, (req, res) => {
     db.get('SELECT license FROM users WHERE id = ?', [req.user.id], (err, user) => {
         if (err) return res.status(500).json({ error: 'Database error' });
@@ -233,4 +252,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 });
-
