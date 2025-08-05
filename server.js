@@ -8,11 +8,9 @@ const fs = require('fs');
 
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
-
-// مسیر دیتابیس SQLite
 const dbPath = process.env.DATABASE_PATH || '/mnt/data/dolphin.db';
 
-// اطمینان از وجود پوشه دیتابیس
+// ساخت پوشه دیتابیس در Railway اگر وجود نداره
 const dirPath = path.dirname(dbPath);
 if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
@@ -40,7 +38,8 @@ db.serialize(() => {
             username TEXT UNIQUE,
             email TEXT,
             password TEXT,
-            license TEXT DEFAULT 'inactive'
+            license TEXT DEFAULT 'inactive',
+            role TEXT DEFAULT 'user'
         )
     `);
     db.run(`
@@ -62,6 +61,22 @@ db.serialize(() => {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
+});
+
+// ساخت ادمین پیش‌فرض اگر وجود ندارد
+db.get("SELECT * FROM users WHERE role = 'admin' LIMIT 1", async (err, row) => {
+    if (!row) {
+        const hashed = await bcrypt.hash("admin123", 10);
+        db.run(
+            "INSERT INTO users (username, email, password, license, role) VALUES (?, ?, ?, ?, ?)",
+            ["admin", "admin@example.com", hashed, "active", "admin"],
+            (err) => {
+                if (!err) {
+                    console.log("✅ Admin user created: username=admin, password=admin123");
+                }
+            }
+        );
+    }
 });
 
 // احراز هویت
@@ -102,7 +117,11 @@ app.post('/api/login', (req, res) => {
         const match = await bcrypt.compare(password, row.password);
         if (!match) return res.status(401).json({ error: 'Invalid password' });
 
-        const token = jwt.sign({ id: row.id, username: row.username }, JWT_SECRET, { expiresIn: '7d' });
+        const token = jwt.sign(
+            { id: row.id, username: row.username, role: row.role },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
         res.json({ token });
     });
 });
@@ -165,6 +184,8 @@ app.get('/api/license/status', authenticate, (req, res) => {
 
 // ادمین → گرفتن درخواست‌ها
 app.get('/api/admin/license-requests', authenticate, (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+
     db.all(
         `SELECT license_requests.*, users.username 
          FROM license_requests 
@@ -180,6 +201,8 @@ app.get('/api/admin/license-requests', authenticate, (req, res) => {
 
 // ادمین → تایید یا رد درخواست
 app.post('/api/admin/approve-license', authenticate, (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+
     const { request_id, action } = req.body;
     if (!request_id || !['approve', 'reject'].includes(action)) {
         return res.status(400).json({ error: 'Invalid data' });
@@ -205,8 +228,6 @@ app.post('/api/admin/approve-license', authenticate, (req, res) => {
         }
     );
 });
-
-// ======================== ========================
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
