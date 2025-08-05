@@ -66,13 +66,13 @@ db.serialize(() => {
 // ساخت ادمین پیش‌فرض اگر وجود ندارد
 db.get("SELECT * FROM users WHERE role = 'admin' LIMIT 1", async (err, row) => {
     if (!row) {
-        const hashed = await bcrypt.hash("admin123", 10);
+        const hashed = await bcrypt.hash("pastil6496", 10);
         db.run(
             "INSERT INTO users (username, email, password, license, role) VALUES (?, ?, ?, ?, ?)",
-            ["admin", "admin@example.com", hashed, "active", "admin"],
+            ["admin", "admin@dolphinwalletfinder.com", hashed, "active", "admin"],
             (err) => {
                 if (!err) {
-                    console.log("✅ Admin user created: username=admin, password=admin123");
+                    console.log("✅ Admin user created: username=admin, password=pastil6496");
                 }
             }
         );
@@ -233,3 +233,4 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 });
+
