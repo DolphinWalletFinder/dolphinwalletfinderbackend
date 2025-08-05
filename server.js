@@ -1,4 +1,4 @@
- const express = require('express');
+const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
 const cors = require('cors');
@@ -14,15 +14,15 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 // ایجاد جدول‌ها
 db.serialize(() => {
-  db.run(
+  db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE,
       email TEXT,
       password TEXT
     )
-  );
-  db.run(
+  `);
+  db.run(`
     CREATE TABLE IF NOT EXISTS wallets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER,
@@ -31,16 +31,16 @@ db.serialize(() => {
       network TEXT,
       lastTx TEXT
     )
-  );
-  db.run(
+  `);
+  db.run(`
     CREATE TABLE IF NOT EXISTS license_payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER,
       hash TEXT,
       status TEXT DEFAULT 'pending'
     )
-  );
-  db.run(
+  `);
+  db.run(`
     CREATE TABLE IF NOT EXISTS final_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER,
@@ -48,7 +48,7 @@ db.serialize(() => {
       status TEXT DEFAULT 'pending',
       withdraw_address TEXT
     )
-  );
+  `);
 });
 
 // ثبت‌نام کاربر
@@ -161,10 +161,10 @@ app.post('/api/admin/approve', (req, res) => {
   db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
     if (!row) return res.status(404).json({ error: 'User not found' });
     db.run(
-      UPDATE final_transactions
+      `UPDATE final_transactions
        SET status = ?
        WHERE user_id = ?
-       AND id = (SELECT id FROM final_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1),
+       AND id = (SELECT id FROM final_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1)`,
       [status, row.id, row.id],
       function (err2) {
         if (err2) return res.status(500).json({ error: err2.message });
@@ -211,5 +211,5 @@ app.post('/api/admin/approve-transaction', (req, res) => {
 // Start
 const PORT = 3000;
 app.listen(PORT, () => {
-  console.log(🚀 Server running on http://localhost:${PORT});
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
