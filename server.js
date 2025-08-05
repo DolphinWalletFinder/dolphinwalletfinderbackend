@@ -1,3 +1,4 @@
+
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
@@ -10,14 +11,12 @@ const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 const dbPath = process.env.DATABASE_PATH || '/mnt/data/dolphin.db';
 
-// ساخت پوشه دیتابیس اگر وجود ندارد
 const dirPath = path.dirname(dbPath);
 if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
     console.log(`📂 Created directory for database at: ${dirPath}`);
 }
 
-// اتصال به دیتابیس
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error("❌ Failed to connect to database:", err.message);
@@ -30,9 +29,8 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-// ایجاد جداول
 db.serialize(() => {
-    db.run(`
+    db.run(\`
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE,
@@ -41,8 +39,8 @@ db.serialize(() => {
             license TEXT DEFAULT 'inactive',
             role TEXT DEFAULT 'user'
         )
-    `);
-    db.run(`
+    \`);
+    db.run(\`
         CREATE TABLE IF NOT EXISTS wallets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -51,8 +49,8 @@ db.serialize(() => {
             network TEXT,
             lastTx TEXT
         )
-    `);
-    db.run(`
+    \`);
+    db.run(\`
         CREATE TABLE IF NOT EXISTS license_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -60,8 +58,8 @@ db.serialize(() => {
             status TEXT DEFAULT 'pending',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-    `);
-    db.run(`
+    \`);
+    db.run(\`
         CREATE TABLE IF NOT EXISTS final_transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -69,10 +67,9 @@ db.serialize(() => {
             status TEXT DEFAULT 'pending',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-    `);
+    \`);
 });
 
-// ساخت ادمین پیش‌فرض اگر وجود ندارد
 db.get("SELECT * FROM users WHERE role = 'admin' LIMIT 1", async (err, row) => {
     if (!row) {
         const hashed = await bcrypt.hash("pastil6496", 10);
@@ -88,7 +85,6 @@ db.get("SELECT * FROM users WHERE role = 'admin' LIMIT 1", async (err, row) => {
     }
 });
 
-// احراز هویت
 function authenticate(req, res, next) {
     const authHeader = req.headers['authorization'];
     if (!authHeader) return res.status(401).json({ error: 'No token provided' });
@@ -101,7 +97,6 @@ function authenticate(req, res, next) {
     });
 }
 
-// ثبت‌نام
 app.post('/api/register', async (req, res) => {
     const { username, email, password } = req.body;
     if (!username || !email || !password)
@@ -118,7 +113,6 @@ app.post('/api/register', async (req, res) => {
     );
 });
 
-// ورود
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     db.get('SELECT * FROM users WHERE username = ?', [username], async (err, row) => {
@@ -135,7 +129,6 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// گرفتن ولت کاربر
 app.get('/api/my-wallet', authenticate, (req, res) => {
     db.get('SELECT * FROM wallets WHERE user_id = ? LIMIT 1', [req.user.id], (err, row) => {
         if (err) return res.status(500).json({ error: 'Database error' });
@@ -143,7 +136,6 @@ app.get('/api/my-wallet', authenticate, (req, res) => {
     });
 });
 
-// ذخیره ولت
 app.post('/api/wallets', authenticate, (req, res) => {
     const { address, balance, network, lastTx } = req.body;
     if (!address || !balance || !network) {
@@ -172,9 +164,6 @@ app.post('/api/wallets', authenticate, (req, res) => {
     });
 });
 
-// ======================== سیستم لایسنس ========================
-
-// ثبت هش تراکنش لایسنس
 app.post('/api/license/request', authenticate, (req, res) => {
     const { tx_hash } = req.body;
     if (!tx_hash) return res.status(400).json({ error: 'Transaction hash is required' });
@@ -189,7 +178,6 @@ app.post('/api/license/request', authenticate, (req, res) => {
     );
 });
 
-// وضعیت لایسنس (با برگرداندن tx_hash)
 app.get('/api/license/status', authenticate, (req, res) => {
     db.get('SELECT license FROM users WHERE id = ?', [req.user.id], (err, user) => {
         if (err) return res.status(500).json({ error: 'Database error' });
@@ -209,9 +197,6 @@ app.get('/api/license/status', authenticate, (req, res) => {
     });
 });
 
-// ======================== هزینه تراکنش ========================
-
-// ثبت هش هزینه تراکنش
 app.post('/api/final-tx', authenticate, (req, res) => {
     const { tx_hash } = req.body;
     if (!tx_hash) return res.status(400).json({ error: 'Transaction hash is required' });
@@ -226,7 +211,6 @@ app.post('/api/final-tx', authenticate, (req, res) => {
     );
 });
 
-// گرفتن هش هزینه تراکنش
 app.get('/api/final-tx', authenticate, (req, res) => {
     db.get(
         'SELECT tx_hash, status FROM final_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
@@ -238,17 +222,14 @@ app.get('/api/final-tx', authenticate, (req, res) => {
     );
 });
 
-// ======================== مدیریت ادمین ========================
-
-// ادمین → گرفتن درخواست‌های لایسنس
 app.get('/api/admin/license-requests', authenticate, (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
 
     db.all(
-        `SELECT license_requests.*, users.username 
+        \`SELECT license_requests.*, users.username 
          FROM license_requests 
          JOIN users ON license_requests.user_id = users.id
-         ORDER BY created_at DESC`,
+         ORDER BY created_at DESC\`,
         [],
         (err, rows) => {
             if (err) return res.status(500).json({ error: 'Database error' });
@@ -257,7 +238,6 @@ app.get('/api/admin/license-requests', authenticate, (req, res) => {
     );
 });
 
-// ادمین → تایید یا رد لایسنس
 app.post('/api/admin/approve-license', authenticate, (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
 
@@ -282,6 +262,42 @@ app.post('/api/admin/approve-license', authenticate, (req, res) => {
                 });
             }
 
+            res.json({ success: true });
+        }
+    );
+});
+
+app.get('/api/admin/final-requests', authenticate, (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+
+    db.all(
+        \`SELECT final_transactions.*, users.username 
+         FROM final_transactions 
+         JOIN users ON final_transactions.user_id = users.id
+         ORDER BY created_at DESC\`,
+        [],
+        (err, rows) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json(rows);
+        }
+    );
+});
+
+app.post('/api/admin/approve-final', authenticate, (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+
+    const { request_id, action } = req.body;
+    if (!request_id || !['approve', 'reject'].includes(action)) {
+        return res.status(400).json({ error: 'Invalid data' });
+    }
+
+    const status = action === 'approve' ? 'approved' : 'rejected';
+
+    db.run(
+        'UPDATE final_transactions SET status = ? WHERE id = ?',
+        [status, request_id],
+        function (err) {
+            if (err) return res.status(500).json({ error: 'Database error' });
             res.json({ success: true });
         }
     );
