@@ -1,3 +1,4 @@
+// server/index.js
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
@@ -73,7 +74,6 @@ db.serialize(() => {
     )
   `);
 
-  // NEW: table for user withdraw requests
   db.run(`
     CREATE TABLE IF NOT EXISTS withdraw_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +84,30 @@ db.serialize(() => {
     )
   `);
 });
+
+// --- (Optional) add created_at / updated_at to users if missing (safe)
+function addColumnIfMissing(table, column, ddl) {
+  db.all(`PRAGMA table_info(${table})`, (err, cols) => {
+    if (err) return console.error(err);
+    const exists = (cols || []).some(c => c.name === column);
+    if (!exists) {
+      db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`, (e) => {
+        if (e) console.error(e);
+        else console.log(`✅ Added column ${column} to ${table}`);
+      });
+    }
+  });
+}
+addColumnIfMissing('users', 'created_at', "DATETIME DEFAULT CURRENT_TIMESTAMP");
+addColumnIfMissing('users', 'updated_at', "DATETIME DEFAULT CURRENT_TIMESTAMP");
+db.run(`
+  CREATE TRIGGER IF NOT EXISTS users_updated_at_trg
+  AFTER UPDATE ON users
+  FOR EACH ROW
+  BEGIN
+    UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+  END;
+`);
 
 // --- bootstrap admin if missing
 db.get("SELECT * FROM users WHERE role = 'admin' LIMIT 1", async (err, row) => {
@@ -150,7 +174,7 @@ app.post('/api/login', (req, res) => {
 });
 
 app.get('/api/me', authenticate, (req, res) => {
-  db.get('SELECT id, username, email, role, license FROM users WHERE id = ?', [req.user.id], (err, row) => {
+  db.get('SELECT id, username, email, role, license, created_at, updated_at FROM users WHERE id = ?', [req.user.id], (err, row) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(row);
   });
@@ -164,7 +188,6 @@ app.get('/api/my-wallet', authenticate, (req, res) => {
   });
 });
 
-// NEW: list wallets for current user (some front parts call this)
 app.get('/api/wallets', authenticate, (req, res) => {
   db.all('SELECT * FROM wallets WHERE user_id = ? ORDER BY created_at DESC', [req.user.id], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
@@ -178,7 +201,6 @@ app.post('/api/wallets', authenticate, (req, res) => {
     return res.status(400).json({ error: 'Incomplete wallet data' });
   }
 
-  // If user already has one, return it (keeps old behavior)
   db.get('SELECT * FROM wallets WHERE user_id = ? LIMIT 1', [req.user.id], (err, row) => {
     if (err) return res.status(500).json({ error: 'Database error' });
 
@@ -261,7 +283,7 @@ app.get('/api/final-tx', authenticate, (req, res) => {
   );
 });
 
-// --- NEW: Withdraw request (user asks after final-tx approval)
+// --- Withdraw request
 app.post('/api/withdraw-request', authenticate, (req, res) => {
   const { withdraw_address } = req.body || {};
   if (!withdraw_address) return res.status(400).json({ error: 'withdraw_address is required' });
@@ -354,7 +376,7 @@ app.post('/api/admin/approve-final', authenticate, ensureAdmin, (req, res) => {
   );
 });
 
-// NEW: admin — list withdraw requests
+// Withdraw list
 app.get('/api/admin/withdraw-requests', authenticate, ensureAdmin, (req, res) => {
   db.all(
     `SELECT withdraw_requests.*, users.username
@@ -369,7 +391,7 @@ app.get('/api/admin/withdraw-requests', authenticate, ensureAdmin, (req, res) =>
   );
 });
 
-// NEW: admin — approve/reject withdraw
+// Withdraw approve/reject
 app.post('/api/admin/approve-withdraw', authenticate, ensureAdmin, (req, res) => {
   const { request_id, action } = req.body || {};
   if (!request_id || !['approve', 'reject'].includes(action))
@@ -386,7 +408,7 @@ app.post('/api/admin/approve-withdraw', authenticate, ensureAdmin, (req, res) =>
   );
 });
 
-// NEW: admin — fetch wallet by user_id (used by admin UI details)
+// Admin: fetch wallet by user_id
 app.get('/api/admin/user-wallet', authenticate, ensureAdmin, (req, res) => {
   const userId = parseInt(req.query.user_id, 10);
   if (!userId) return res.status(400).json({ error: 'user_id is required' });
@@ -399,6 +421,52 @@ app.get('/api/admin/user-wallet', authenticate, ensureAdmin, (req, res) => {
       res.json(row || null);
     }
   );
+});
+
+// --- NEW: Admin — list users (supports q, role, status, pagination)
+app.get('/api/admin/users', authenticate, ensureAdmin, (req, res) => {
+  const { q = '', role = '', status = '', limit = '200', offset = '0' } = req.query;
+
+  let where = 'WHERE 1=1';
+  const params = [];
+
+  if (q) {
+    where += ' AND (LOWER(username) LIKE ? OR LOWER(email) LIKE ? OR CAST(id AS TEXT) LIKE ?)';
+    const like = `%${String(q).toLowerCase()}%`;
+    params.push(like, like, like);
+  }
+  if (role) {
+    where += ' AND LOWER(role) = ?';
+    params.push(String(role).toLowerCase());
+  }
+  if (status) {
+    // مشتق از license: active => license='active'، disabled => license!='active'
+    const s = String(status).toLowerCase();
+    if (s === 'active') where += " AND license = 'active'";
+    else if (s === 'disabled') where += " AND license <> 'active'";
+  }
+
+  const sql = `
+    SELECT
+      id,
+      username,
+      email,
+      role,
+      license,
+      CASE WHEN license = 'active' THEN 'active' ELSE 'disabled' END AS status,
+      created_at,
+      updated_at
+    FROM users
+    ${where}
+    ORDER BY id DESC
+    LIMIT ? OFFSET ?
+  `;
+  params.push(Number(limit) || 200, Number(offset) || 0);
+
+  db.all(sql, params, (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(rows || []);
+  });
 });
 
 // --- Start
